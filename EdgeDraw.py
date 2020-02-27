@@ -8,105 +8,103 @@ class EdgeDraw(object):
         self.addrOut = addrOut
 
 
-    @staticmethod
-    def smooth(img):
-        ##non-local denoising, patch window 7
-        noiselessImage = cv2.fastNlMeansDenoisingColored(
-            img, None, 10, 10, 7, 21)
-        return noiselessImage
+    def smooth(self,img):
+        img = cv2.GaussianBlur(img, (5,5), 0)
+        return img
 
-    @staticmethod
-    def cutEdge(img):
+    def cutEdge(self, img):
         rs,cs = img.shape
         img [0, :] = 0
         img [rs-1,:] = 0
         img [:, 0] = 0
-        img [:, rs -1] = 0
+        img [:, cs -1] = 0
 
-    @staticmethod
-    def findAnchors(img, kernel = 5, thre = 8):
+    def getThreshould(self, img):
+        ##get threshould of the
+        high_thresh, thresh_im = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return high_thresh
+
+
+    def findAnchors(self, img, window = 4, g_thre = 36,anchorthre = 8):
         ###get a edge gradience and direction map
+        otsuthre = self.getThreshould(img)
         dx = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=5)
         dy = cv2.Sobel(img, cv2.CV_64F, 0, 1, ksize=5)
         magMap =  np.sqrt(dx*dx + dy*dy)
-        EdgeDraw.cutEdge(magMap)
-        direMap = np.where(np.abs(dx) > np.abs(dy), np.ones(dx.shape),np.zeros(dx.shape))#1 for horizontal
+        self.cutEdge(magMap)
+        maxV = np.max(magMap)
+        g_thre = otsuthre*0.25/255 * maxV#normalization
+        magMap = np.where(magMap >= g_thre, magMap, 0)
+        print('thre: ', anchorthre)
+        direMap = np.where(np.abs(dy) > np.abs(dx), np.ones(dx.shape),np.zeros(dx.shape))#1 for horizontal
         y_pre_1 = np.roll(magMap, -1, axis=0)
         y_next_1 = np.roll(magMap, 1, axis=0)
         x_pre_1 = np.roll(magMap, -1, axis=1)
         x_next_1 =np.roll(magMap, 1, axis=1)
-        ##todo: waht to do with edges, probably just wipe all them to 0?
-        t = np.where(((direMap == 1) & (np.abs(magMap - y_next_1) > thre) & (np.abs(magMap - y_pre_1) > thre)) | ((direMap == 0) & (np.abs(magMap - x_pre_1) > thre) & (np.abs(magMap - x_next_1) > thre))) #isAnchor, dab 1
-        anchors = list(zip(*t))
-        print(anchors)
+        anchorMap = np.where(((direMap == 1) & (magMap - y_next_1 > anchorthre) & (magMap - y_pre_1 > anchorthre)| ((direMap == 0) & (magMap - x_pre_1 > anchorthre) & (magMap - x_next_1 > anchorthre))), np.ones(magMap.shape),np.zeros(magMap.shape))
+        ####window selection######################################
+        rsize, csize = magMap.shape
+        copyMap = np.zeros(magMap.shape)
+        for ir in range(0,rsize,window):
+            for ic in range(0,csize,window):
+                copyMap[ir,ic] = anchorMap[ir,ic]
+        #ranchors = list(zip(*np.where(anchorMap>0)))
+        #EdgeDraw.showEdges(ranchors,[img.shape[0],img.shape[1],3])
+        #print(ranchors)
+        anchors = list(zip(*np.where(copyMap > 0)))
+        #self.showEdges(anchors,[img.shape[0],img.shape[1],3])
         return magMap,direMap,anchors#x, y coordinates of anchors
 
 
-    @staticmethod
-    def drawEdges(magMap, direMap, anchors):
-        '''
-        smart route all edges from anchors
-        :param anchorMap
-        :return:
-        '''
+    def drawEdges(self,magMap, direMap, anchors):
+        edges=[]
         #for each point, check three neighbours depend on direction
-        def moveOnce(direction, pX, pY):
-            if direction is 'left':
-                neighbours= magMap[pX-1,pY-1:pY+2]
+        def moveOnce(direction, py, px):
+            if direction is 'up':
+                neighbours= magMap[py - 1, px - 1:px + 2]
                 ind = np.argmax(neighbours, axis=None)
-                return (pX-1, pY+ind-1)
+                return (py - 1, px + ind - 1)
+            elif direction is 'down':
+                neighbours = magMap[py + 1, px - 1:px + 2]
+                ind = np.argmax(neighbours, axis=None)
+                return (py + 1, px + ind - 1)
+            elif direction is 'left':
+                neighbours = magMap[py-1:py+2, px - 1]
+                ind = np.argmax(neighbours, axis=None)
+                return (py + ind - 1, px - 1)
             elif direction is 'right':
-                neighbours = magMap[pX+1, pY-1:pY+2]
+                neighbours = magMap[py-1:py+2, px + 1]
                 ind = np.argmax(neighbours, axis=None)
-                return (pX+1, pY+ind-1)
-            elif direction is 'up':
-                neighbours = magMap[idxX-1:idxX+2, idxY - 1]
-                ind = np.argmax(neighbours, axis=None)
-                return (pX+ind-1, pY-1)
-            else:
-                neighbours = magMap[idxX-1:idxX+2, idxY + 1]
-                ind = np.argmax(neighbours, axis=None)
-                return (pX+ind-1, pY+1)
-            return newPoint
+                return (py + ind - 1, px + 1)
 
-        def moveTillEnd(direction, idxX, idxY):
-            edge = [ (idxX,idxY)]
+        def moveTillEnd(ind, idx_y, idx_x):
             stopFlag = False
-            while magMap[idxX][idxY] > 0 and not stopFlag:
-                newPoint = moveOnce(direction, idxX, idxY)
-                if newPoint in anchors:
+            dire = ['left','right','up','down']
+            while magMap[idx_y][idx_x] > 0 and not stopFlag:
+                newPoint = moveOnce(dire[ind], idx_y, idx_x)
+                if newPoint in anchors or newPoint in edges:
                     stopFlag = True
                 else:
-                    edge.append(newPoint)
-                    idxX, idxY = newPoint
+                    edges.append(newPoint)
+                    idx_y, idx_x = newPoint
 
-            return edge
-
-        edges=[]
-        def addEdge(edge):
-            if len(edge)>1:
-                edges.append(edge)
         #todo:handle connectivity by excluding duplicate points and concatenate?
         for idxX,idxY in anchors:
-            if direMap[idxX][idxY] == 1:  # Horizontal
-                el = moveTillEnd('left', idxX, idxY)
-                er = moveTillEnd('right', idxX, idxY)
-                addEdge(el)
-                addEdge(er)
-            if direMap[idxX][idxY] == 0:  # Vertical
-                eU = moveTillEnd('up', idxX, idxY)
-                eD = moveTillEnd('down', idxX, idxY)
-                addEdge(eU)
-                addEdge(eD)
-        return edges
-    @staticmethod
-    def showEdges(edges,imshape):
-        pointFig = np.zeros(imshape, np.uint8)
-        for edge in edges:
-            for pointX, pointY in edge:
-                pointFig[pointX, pointY ] = (0, 0, 0)
+            if direMap[idxX][idxY] == 1:
+                moveTillEnd(0,idxX, idxY)
+                moveTillEnd(1,idxX, idxY)
+            else:
+                moveTillEnd(2, idxX, idxY)
+                moveTillEnd(3, idxX, idxY)
 
-        EdgeDraw.showImage('edges', pointFig)
+        return edges
+
+    def showEdges(self, edges,imshape):
+        pointFig = np.zeros(imshape, np.uint8)
+        for pointX, pointY in edges:
+            pointFig[pointX, pointY] = [255, 255, 255]
+
+        return pointFig
 
     @staticmethod
     def showImage( name, img):
@@ -115,7 +113,7 @@ class EdgeDraw(object):
         cv2.destroyAllWindows()
 
 
-    def run(self):
+    def run(self, show = False):
         '''
         main function
         :return:
@@ -123,19 +121,26 @@ class EdgeDraw(object):
         ###read image
         im = cv2.imread(self.addrIn)
         ###denoising
-        noiseless = self.__class__.smooth(im)
-        self.__class__.showImage('smooth over', noiseless)
+        noiseless = self.smooth(im)
+        if show:
+            self.showImage('smooth over', noiseless)
         ###gray
         gray = cv2.cvtColor(noiseless, cv2.COLOR_BGR2GRAY)
+        ###canny for comparision
+        otsuthre = self.getThreshould(gray)
+        canny = cv2.Canny(gray, 0.5*otsuthre, otsuthre)
+        #cv2.imwrite('./images/gray.jpg', gray)
+        cv2.imwrite('./images/canny.jpg', canny)
         ###find anchors
         ###smart rounting
-        magMap, direMap, anchors = self.__class__.findAnchors(gray)
-        edges = self.__class__.drawEdges(magMap, direMap, anchors)
-        self.__class__.showEdges(edges, im.shape)
+        magMap, direMap, anchors = self.findAnchors(gray)
+        edges = self.drawEdges(magMap, direMap, anchors)
+        out = self.showEdges(edges, im.shape)
+        if show:
+            self.showImage('edges', out)
+        cv2.imwrite('./images/edges.jpg', out)
+
 
 if __name__ == '__main__':
-    e = EdgeDraw('./images/section8-image.png', './images/edges.jpg')
+    e = EdgeDraw('./images/dog.jpg', './images/edges.jpg')
     e.run()
-
-
-
