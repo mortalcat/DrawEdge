@@ -3,8 +3,7 @@ import numpy as np
 ##Implementation of EdgeDrawing Algorithm
 ##Input a image, output its edge
 class EdgeDraw(object):
-    def __init__(self, addrIn, addrOut):
-        self.addrIn = addrIn
+    def __init__(self, addrOut = None):
         self.addrOut = addrOut
 
 
@@ -25,7 +24,7 @@ class EdgeDraw(object):
         return high_thresh
 
 
-    def findAnchors(self, img, window = 4, g_thre = 36,anchorthre = 8):
+    def findAnchors(self, img, window = 3,anchorthre = 6):
         ###get a edge gradience and direction map
         otsuthre = self.getThreshould(img)
         dx = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=5)
@@ -33,7 +32,7 @@ class EdgeDraw(object):
         magMap =  np.sqrt(dx*dx + dy*dy)
         self.cutEdge(magMap)
         maxV = np.max(magMap)
-        g_thre = otsuthre*0.25/255 * maxV#normalization
+        g_thre = otsuthre*0.25/255 * maxV#initial filtering
         magMap = np.where(magMap >= g_thre, magMap, 0)
         print('thre: ', anchorthre)
         direMap = np.where(np.abs(dy) > np.abs(dx), np.ones(dx.shape),np.zeros(dx.shape))#1 for horizontal
@@ -78,6 +77,8 @@ class EdgeDraw(object):
                 return (py + ind - 1, px + 1)
 
         def moveTillEnd(ind, idx_y, idx_x):
+            #edge = [(idx_y, idx_x)]
+            edges.append((idx_y, idx_x))
             stopFlag = False
             dire = ['left','right','up','down']
             while magMap[idx_y][idx_x] > 0 and not stopFlag:
@@ -87,21 +88,25 @@ class EdgeDraw(object):
                 else:
                     edges.append(newPoint)
                     idx_y, idx_x = newPoint
+                #if len(edge) > 1:
+                    #edges.append(edge)
+
 
         #todo:handle connectivity by excluding duplicate points and concatenate?
         for idxX,idxY in anchors:
-            if direMap[idxX][idxY] == 1:
+            if direMap[idxX][idxY] == 1:#horizontal
                 moveTillEnd(0,idxX, idxY)
                 moveTillEnd(1,idxX, idxY)
-            else:
+            else:#vertical
                 moveTillEnd(2, idxX, idxY)
                 moveTillEnd(3, idxX, idxY)
 
         return edges
 
-    def showEdges(self, edges,imshape):
+    def showEdges(self,pList,imshape):
         pointFig = np.zeros(imshape, np.uint8)
-        for pointX, pointY in edges:
+        #for edge in edges:
+        for pointX, pointY in pList:
             pointFig[pointX, pointY] = [255, 255, 255]
 
         return pointFig
@@ -113,13 +118,13 @@ class EdgeDraw(object):
         cv2.destroyAllWindows()
 
 
-    def run(self, show = False):
+    def run(self, im, window=3,show = False):
         '''
         main function
         :return:
         '''
         ###read image
-        im = cv2.imread(self.addrIn)
+        #im = cv2.imread(self.addrIn)
         ###denoising
         noiseless = self.smooth(im)
         if show:
@@ -133,8 +138,9 @@ class EdgeDraw(object):
         cv2.imwrite('./images/canny.jpg', canny)
         ###find anchors
         ###smart rounting
-        magMap, direMap, anchors = self.findAnchors(gray)
+        magMap, direMap, anchors = self.findAnchors(gray,window)
         edges = self.drawEdges(magMap, direMap, anchors)
+        return edges
         out = self.showEdges(edges, im.shape)
         if show:
             self.showImage('edges', out)
@@ -142,5 +148,6 @@ class EdgeDraw(object):
 
 
 if __name__ == '__main__':
-    e = EdgeDraw('./images/dog.jpg', './images/edges.jpg')
-    e.run()
+    e = EdgeDraw()
+    i = cv2.imread('./images/mouse.jpg')
+    e.run(i,2, True)
