@@ -56,7 +56,8 @@ class EdgeDraw(object):
 
 
     def drawEdges(self,magMap, direMap, anchors):
-        edges=[]
+        edgeSet=set()
+        edges = []
         #for each point, check three neighbours depend on direction
         def moveOnce(direction, py, px):
             if direction is 'up':
@@ -76,20 +77,22 @@ class EdgeDraw(object):
                 ind = np.argmax(neighbours, axis=None)
                 return (py + ind - 1, px + 1)
 
-        def moveTillEnd(ind, idx_y, idx_x):
-            #edge = [(idx_y, idx_x)]
-            edges.append((idx_y, idx_x))
-            stopFlag = False
+        def moveTillEnd(idxDirection, idx_y, idx_x):
             dire = ['left','right','up','down']
+            edge = [(idx_y, idx_x)]
+            edgeSet.add((idx_y, idx_x))
+            stopFlag = False
             while magMap[idx_y][idx_x] > 0 and not stopFlag:
-                newPoint = moveOnce(dire[ind], idx_y, idx_x)
-                if newPoint in anchors or newPoint in edges:
+                newPoint = moveOnce(dire[idxDirection], idx_y, idx_x)
+                if newPoint in anchors or newPoint in edgeSet:
                     stopFlag = True
                 else:
-                    edges.append(newPoint)
+                    edge.append(newPoint)
+                    edgeSet.add(newPoint)
                     idx_y, idx_x = newPoint
-                #if len(edge) > 1:
-                    #edges.append(edge)
+
+            if len(edge) > 1:
+                edges.append(edge)
 
 
         #todo:handle connectivity by excluding duplicate points and concatenate?
@@ -140,11 +143,15 @@ class EdgeDraw(object):
         ###smart rounting
         magMap, direMap, anchors = self.findAnchors(gray,window)
         edges = self.drawEdges(magMap, direMap, anchors)
-        return edges
-        out = self.showEdges(edges, im.shape)
+        edgeInOne = []
+        for e in edges:
+            edgeInOne.extend(e)
+        out = self.showEdges(edgeInOne, im.shape)
         if show:
             self.showImage('edges', out)
-        cv2.imwrite('./images/edges.jpg', out)
+        cv2.imwrite('./images/edgesAddCondition.jpg', out)
+        return edges
+
 
 
 if __name__ == '__main__':
